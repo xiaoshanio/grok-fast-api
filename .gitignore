@@ -40,11 +40,23 @@ env/
 
 # Logs
 logs/
+app/logs/
 *.log
+*.out
+*.err
 
 # Data
 data/
 app/data/
+*.db
+*.sqlite
+*.sqlite3
+*.db.migrated
+
+# Local deployment/cache state
+.vercel/
+.netlify/
+.railway/
 
 # Testing
 .pytest_cache/
@@ -53,3 +65,4 @@ htmlcov/
 
 # Project specific
 .ace-tool/
+__tmp*
