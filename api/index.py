@@ -7,6 +7,9 @@ def _init_aiven_ca() -> None:
     ca_path = Path(os.getenv("AIVEN_CA_CERT_PATH", "/tmp/grok2api-data/aiven-ca.pem"))
 
     if ca_cert:
+        ca_cert = ca_cert.strip().strip('"').strip("'")
+        if "\\n" in ca_cert and "\n" not in ca_cert:
+            ca_cert = ca_cert.replace("\\n", "\n")
         ca_path.parent.mkdir(parents=True, exist_ok=True)
         ca_path.write_text(ca_cert.rstrip() + "\n", encoding="utf-8")
 

@@ -44,6 +44,14 @@ _LOCK_FILE = data_path(".scheduler.lock")
 _lock_fd: int | None = None
 
 
+def _is_serverless_environment() -> bool:
+    return bool(
+        os.getenv("VERCEL")
+        or os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+        or os.getenv("FUNCTIONS_WORKER_RUNTIME")
+    )
+
+
 def _try_acquire_scheduler_lock() -> bool:
     """Non-blocking attempt to become the scheduler leader.
 
@@ -99,6 +107,11 @@ setup_logging(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if _is_serverless_environment():
+        logger.info("serverless environment detected: startup background tasks disabled")
+        yield
+        return
+
     # 1. Load configuration.
     await _config.load()
     reload_logging(
@@ -362,13 +375,69 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.state.serverless_runtime_lock = asyncio.Lock()
+    app.state.serverless_runtime_ready = False
+
+    async def _ensure_serverless_runtime() -> None:
+        if not _is_serverless_environment():
+            return
+        if getattr(app.state, "serverless_runtime_ready", False):
+            return
+        async with app.state.serverless_runtime_lock:
+            if getattr(app.state, "serverless_runtime_ready", False):
+                return
+
+            await _config.load()
+
+            from app.control.account.backends.factory import create_repository
+            from app.control.account.refresh import AccountRefreshService
+            from app.control.account.runtime import (
+                reconcile_refresh_runtime,
+                set_refresh_scheduler,
+                set_refresh_scheduler_leader,
+                set_refresh_service,
+            )
+            from app.dataplane.account import get_account_directory
+            from app.platform.startup import run_startup_migrations
+
+            repo = create_repository()
+            await repo.initialize()
+            await run_startup_migrations(
+                config_backend=_config._get_backend(),
+                account_repo=repo,
+            )
+            await _config.load()
+            await reconcile_local_media_cache_async()
+
+            directory = await get_account_directory(repo)
+            refresh_svc = AccountRefreshService(repo)
+            set_refresh_service(refresh_svc)
+            set_refresh_scheduler(None)
+            set_refresh_scheduler_leader(False)
+            reconcile_refresh_runtime(False)
+
+            app.state.repository = repo
+            app.state.directory = directory
+            app.state.refresh_service = refresh_svc
+            app.state.account_refresh_scheduler = None
+            app.state.account_refresh_is_leader = False
+            app.state.serverless_runtime_ready = True
+            logger.info("serverless runtime initialized")
+
     # Ensure config is loaded on every request.
     @app.middleware("http")
     async def _ensure_config(request: Request, call_next):
         from app.control.account.runtime import reconcile_refresh_runtime
 
-        await _config.load()
-        reconcile_refresh_runtime()
+        path = request.url.path
+        if path in {"/health", "/favicon.ico", "/", "/admin", "/admin/login"} or path.startswith("/static/"):
+            return await call_next(request)
+
+        if _is_serverless_environment():
+            await _ensure_serverless_runtime()
+        else:
+            await _config.load()
+            reconcile_refresh_runtime()
         return await call_next(request)
 
     # Global exception handler — converts AppError to JSON.

@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "excludeFiles": "{tests/**,docs/**,scripts/**,Dockerfile*,docker-compose*.yml,render.yaml,*.md,uv.lock}"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
@@ -11,6 +17,7 @@
     "SERVER_HOST": "0.0.0.0",
     "SERVER_WORKERS": "1",
     "ACCOUNT_STORAGE": "postgresql",
+    "LOG_FILE_ENABLED": "false",
     "DATA_DIR": "/tmp/grok2api-data",
     "LOG_DIR": "/tmp/grok2api-logs",
     "AIVEN_CA_CERT_PATH": "/tmp/grok2api-data/aiven-ca.pem"
