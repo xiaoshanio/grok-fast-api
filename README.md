@@ -37,6 +37,8 @@ Grok2API 是一个 OpenAI / Anthropic 兼容的 Grok 网关，支持多账号池
 | `DATA_DIR` | 否 | `./data` | 数据目录 |
 | `LOG_DIR` | 否 | `./logs` | 日志目录 |
 
+部分平台不允许配置 `TZ`。它不是必填项；如果平台提示不能配置，直接删除即可。
+
 ## Aiven PostgreSQL
 
 ### 连接串

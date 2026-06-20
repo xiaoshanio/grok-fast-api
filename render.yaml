@@ -5,8 +5,6 @@ services:
     plan: starter
     healthCheckPath: /health
     envVars:
-      - key: TZ
-        value: Asia/Shanghai
       - key: LOG_LEVEL
         value: INFO
       - key: SERVER_HOST
