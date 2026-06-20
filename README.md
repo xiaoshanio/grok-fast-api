@@ -160,6 +160,7 @@ Render 会自动使用 Dockerfile 构建镜像。Dockerfile 已兼容 Render 注
 
 - `api/index.py`
 - `vercel.json`
+- `.vercelignore`
 
 Vercel 会以 Python Function 方式加载 FastAPI 应用。
 

@@ -6,12 +6,6 @@
       "destination": "/api/index"
     }
   ],
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 300,
-      "excludeFiles": "{tests/**,docs/**,.github/**,Dockerfile*,docker-compose*.yml,render.yaml,README.md,LICENSE,.env.example}"
-    }
-  },
   "env": {
     "LOG_LEVEL": "INFO",
     "SERVER_HOST": "0.0.0.0",

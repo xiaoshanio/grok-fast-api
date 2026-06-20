@@ -1,0 +1,15 @@
+.github/
+docs/
+tests/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+render.yaml
+.env
+.env.example
+README.md
+LICENSE
