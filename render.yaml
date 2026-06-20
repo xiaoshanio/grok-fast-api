@@ -17,3 +17,7 @@ services:
         value: postgresql
       - key: ACCOUNT_POSTGRESQL_URL
         sync: false
+      - key: AIVEN_CA_CERT
+        sync: false
+      - key: AIVEN_CA_CERT_PATH
+        value: /app/data/aiven-ca.pem

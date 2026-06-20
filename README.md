@@ -1,481 +1,356 @@
-<div align="center">
+# Grok2API 多平台部署指南
 
-<img alt="Grok2API" src="https://github.com/user-attachments/assets/037a0a6e-7986-41cc-b4af-04df612ee886" />
+Grok2API 是一个 OpenAI / Anthropic 兼容的 Grok 网关，支持多账号池、Admin 后台、聊天、图像和视频接口。
 
-<h1>Grok Web 能力的 OpenAI 兼容网关</h1>
+本文档只保留部署和运行所需内容，默认推荐 PostgreSQL 存储。Aiven PostgreSQL、Render、Vercel、Docker Compose、Railway、Zeabur、VPS 都可以部署。
 
-<h3>多账号池、智能选号、自动维护</h3>
+## 快速选择
 
-<p>
-将 grok.com 与 console.x.ai 的聊天、图像、视频能力，<br>
-以 <strong>OpenAI / Anthropic 兼容 API</strong> 统一对外提供。
-</p>
+| 平台 | 推荐程度 | 数据库 | 说明 |
+| :-- | :-- | :-- | :-- |
+| Docker Compose / VPS | 推荐 | 内置 PostgreSQL 或 Aiven | 最完整，支持长期运行 |
+| Render | 推荐 | Aiven PostgreSQL | 支持 Docker Web Service，部署稳定 |
+| Railway / Zeabur | 推荐 | 平台 PostgreSQL 或 Aiven | 适合容器化一键部署 |
+| Vercel | 可用但不推荐重负载 | Aiven PostgreSQL | Serverless，不能跑 Docker Compose |
 
-<p>
-<a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white"></a>
-<a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white"></a>
-<a href="https://github.com/jiujiu532/grok2api/pkgs/container/grok2api"><img alt="Docker" src="https://img.shields.io/badge/ghcr.io-jiujiu532%2Fgrok2api-2496ED?logo=docker&logoColor=white"></a>
-<a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a"></a>
-</p>
+## 重要说明
 
-<p>
-<a href="#核心特性">核心特性</a> ·
-<a href="#部署指南">部署指南</a> ·
-<a href="#模型列表">模型列表</a> ·
-<a href="#账号配置">账号配置</a> ·
-<a href="#api-端点">API 端点</a> ·
-<a href="#常见问题">常见问题</a>
-</p>
+- 默认 Docker Compose 已改为 PostgreSQL 模式。
+- `docker-compose.yml` 会加入外部 Docker 网络 `smvapi`。
+- Vercel 不支持 Docker Compose、内置 PostgreSQL 容器、`smvapi` 网络或可靠本地持久化。
+- Aiven PostgreSQL 通常需要 TLS/CA 证书。项目已支持通过环境变量 `AIVEN_CA_CERT` 自动写入证书文件并连接。
+- 首次启动后访问 `/admin/login`，默认密码是 `grok2api`。
 
-</div>
+## 环境变量
 
-> [!NOTE]
-> 本项目仅供学习与研究交流。请务必遵守 Grok 的使用条款及当地法律法规，不得用于非法用途。
+| 变量名 | 必填 | 默认值 | 说明 |
+| :-- | :-- | :-- | :-- |
+| `ACCOUNT_STORAGE` | 是 | `postgresql` | 存储后端，推荐 `postgresql` |
+| `ACCOUNT_POSTGRESQL_URL` | PostgreSQL 模式必填 | 空 | PostgreSQL 连接串 |
+| `AIVEN_CA_CERT` | Aiven 推荐 | 空 | Aiven `ca.pem` 完整内容 |
+| `AIVEN_CA_CERT_PATH` | 否 | `/app/data/aiven-ca.pem` 或 `/tmp/grok2api-data/aiven-ca.pem` | CA 证书写入路径 |
+| `SERVER_HOST` | 否 | `0.0.0.0` | 服务监听地址 |
+| `SERVER_PORT` | 否 | `8000` | Docker/VPS 监听端口 |
+| `HOST_PORT` | 否 | `8000` | Docker Compose 宿主机端口 |
+| `SERVER_WORKERS` | 否 | `1` | Worker 数 |
+| `LOG_LEVEL` | 否 | `INFO` | 日志级别 |
+| `DATA_DIR` | 否 | `./data` | 数据目录 |
+| `LOG_DIR` | 否 | `./logs` | 日志目录 |
 
-本仓库基于上游 [chenyme/grok2api](https://github.com/chenyme/grok2api) 二次开发，新增多账号池管理、Console 免费模型、配额轮换、防封部署等能力。欢迎 PR 和 Fork，二开请保留原作者与前端标识。
+## Aiven PostgreSQL
 
----
+### 连接串
 
-## 核心特性
+在 Aiven 控制台复制 PostgreSQL Service URI，例如：
 
-| 能力 | 说明 |
-| :-- | :-- |
-| OpenAI 兼容 | `/v1/chat/completions`、`/v1/responses`、`/v1/images/generations`、`/v1/videos` |
-| Anthropic 兼容 | `/v1/messages`（Claude SDK 直接对接） |
-| 多账号池 | basic / super / heavy 三级池，自动负载均衡与配额同步 |
-| 免费账号 | 支持 `console.x.ai` SSO Token，`*-console` 模型零成本使用 |
-| 媒体生成 | 文生图、图像编辑、文生视频、图生视频，本地缓存与代理链接 |
-| 防封内置 | `x-statsig-id` 兼容修复，WARP + FlareSolverr 一键部署 |
-| 管理后台 | Admin 配置、账号管理、Web Chat、Masonry 画廊、ChatKit 语音 |
+```text
+postgresql://avnadmin:password@host.aivencloud.com:12345/defaultdb
+```
 
----
+推荐加上 `sslmode=verify-full` 和 `sslrootcert`：
 
-## 部署指南
+```text
+postgresql://avnadmin:password@host.aivencloud.com:12345/defaultdb?sslmode=verify-full
+```
 
-本项目提供两种部署方式：
+项目启动时如果设置了 `AIVEN_CA_CERT`，会自动把证书写入 `AIVEN_CA_CERT_PATH`，并给 `ACCOUNT_POSTGRESQL_URL` 自动追加 `sslrootcert=/path/to/aiven-ca.pem`。
 
-| 方式 | 说明 | 适用场景 |
-| :-- | :-- | :-- |
-| **标准版** | 仅 grok2api，直连 Grok | IP 干净、无 Cloudflare 拦截 |
-| **防封版** | grok2api + WARP + Privoxy + FlareSolverr | IP 被 Cloudflare 拦截、需要稳定访问 |
+### AIVEN_CA_CERT
 
-> [!TIP]
-> 当前版本已内置 403 兼容修复，标准版可直接验证。仍遇 403 时再切防封版。
+把 Aiven 下载的 `ca.pem` 完整内容填入环境变量：
 
----
+```text
+-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+```
 
-### 标准版部署
+如果平台不方便填写多行变量，可以把换行保留为平台支持的多行 Secret。不要把真实证书和数据库密码提交到仓库。
 
-**Docker Compose（推荐）：**
+Docker Compose 场景也可以把 Aiven `ca.pem` 放到本地 `./data/aiven-ca.pem`，然后设置：
+
+```env
+AIVEN_CA_CERT_PATH=/app/data/aiven-ca.pem
+```
+
+容器会通过挂载的 `./data:/app/data` 读取该证书。
+
+## Docker Compose 一键部署
+
+适合 VPS、1Panel、宝塔 Docker、CasaOS、Portainer 等能运行 Docker Compose 的环境。
+
+### 使用内置 PostgreSQL
 
 ```bash
-git clone https://github.com/jiujiu532/grok2api
-cd grok2api/grok2api-main/grok2api-main
 cp .env.example .env
 docker network create smvapi
 docker compose up -d
 ```
 
-查看日志：
+如果 `smvapi` 网络已经存在，可以忽略创建失败提示。
 
-```bash
-docker compose logs -f grok2api
+默认服务：
+
+- `grok2api`: 主服务
+- `postgres`: 内置 PostgreSQL
+- `postgres_data`: PostgreSQL 持久化卷
+- `smvapi`: 外部 Docker 网络
+
+访问：
+
+```text
+http://服务器IP:8000/admin/login
 ```
 
-**Docker 单容器：**
+### 使用 Aiven PostgreSQL
+
+编辑 `.env`：
+
+```env
+ACCOUNT_STORAGE=postgresql
+ACCOUNT_POSTGRESQL_URL=postgresql://avnadmin:password@host.aivencloud.com:12345/defaultdb?sslmode=verify-full
+AIVEN_CA_CERT_PATH=/app/data/aiven-ca.pem
+```
+
+然后把 Aiven 下载的 `ca.pem` 保存为：
+
+```text
+./data/aiven-ca.pem
+```
+
+启动：
+
+```bash
+docker network create smvapi
+docker compose up -d
+```
+
+如果使用 Aiven，可以保留内置 `postgres` 服务不使用，也可以按需从 `docker-compose.yml` 删除 `postgres` 服务和 `depends_on`。
+
+## Render + Aiven PostgreSQL
+
+仓库已内置 `render.yaml`，Render 会按 Docker Web Service 部署。
+
+1. 在 Aiven 创建 PostgreSQL。
+2. 下载 Aiven `ca.pem`。
+3. 将仓库推送到 GitHub。
+4. Render 选择 **New +** -> **Blueprint**。
+5. 连接该仓库。
+6. 填写环境变量：
+
+| 变量名 | 值 |
+| :-- | :-- |
+| `ACCOUNT_POSTGRESQL_URL` | `postgresql://.../defaultdb?sslmode=verify-full` |
+| `AIVEN_CA_CERT` | Aiven `ca.pem` 完整内容 |
+
+`render.yaml` 已包含：
+
+- `runtime: docker`
+- `ACCOUNT_STORAGE=postgresql`
+- `AIVEN_CA_CERT_PATH=/app/data/aiven-ca.pem`
+- `healthCheckPath=/health`
+
+Render 会自动使用 Dockerfile 构建镜像。Dockerfile 已兼容 Render 注入的 `PORT`。
+
+## Vercel + Aiven PostgreSQL
+
+仓库已内置：
+
+- `api/index.py`
+- `vercel.json`
+
+Vercel 会以 Python Function 方式加载 FastAPI 应用。
+
+### 限制
+
+- 不支持 Docker Compose。
+- 不支持内置 PostgreSQL 容器。
+- 不支持 `smvapi` Docker 网络。
+- `/tmp` 是临时目录，不能当持久化存储。
+- 长流式请求、批量刷新和大文件缓存可能受 Serverless 限制影响。
+
+### 部署步骤
+
+1. 在 Aiven 创建 PostgreSQL。
+2. 下载 Aiven `ca.pem`。
+3. 将仓库推送到 GitHub。
+4. 在 Vercel 导入该仓库。
+5. 在 Vercel 项目环境变量中添加：
+
+| 变量名 | 值 |
+| :-- | :-- |
+| `ACCOUNT_STORAGE` | `postgresql` |
+| `ACCOUNT_POSTGRESQL_URL` | `postgresql://.../defaultdb?sslmode=verify-full` |
+| `AIVEN_CA_CERT` | Aiven `ca.pem` 完整内容 |
+| `DATA_DIR` | `/tmp/grok2api-data` |
+| `LOG_DIR` | `/tmp/grok2api-logs` |
+
+6. 点击 Deploy。
+
+`api/index.py` 会在导入 FastAPI 应用前写入 Aiven CA 证书，并自动给数据库连接串追加 `sslrootcert`。
+
+## Railway 部署
+
+Railway 可直接使用 Dockerfile。
+
+1. 新建 Railway Project。
+2. 选择从 GitHub 仓库部署。
+3. Railway 检测 Dockerfile 后自动构建。
+4. 添加环境变量：
+
+```env
+ACCOUNT_STORAGE=postgresql
+ACCOUNT_POSTGRESQL_URL=postgresql://...
+AIVEN_CA_CERT=-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+SERVER_HOST=0.0.0.0
+SERVER_WORKERS=1
+```
+
+如果使用 Railway 自带 PostgreSQL，把 Railway 提供的 PostgreSQL URL 填入 `ACCOUNT_POSTGRESQL_URL`。如果使用 Aiven，按上面的 Aiven 证书方式填写。
+
+## Zeabur 部署
+
+Zeabur 可用 Dockerfile 或 Docker Compose。
+
+### Dockerfile 方式
+
+1. 新建 Zeabur Project。
+2. 从 GitHub 导入仓库。
+3. 选择 Dockerfile 部署。
+4. 添加环境变量：
+
+```env
+ACCOUNT_STORAGE=postgresql
+ACCOUNT_POSTGRESQL_URL=postgresql://...
+AIVEN_CA_CERT=-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+SERVER_HOST=0.0.0.0
+SERVER_WORKERS=1
+```
+
+### Compose 方式
+
+如果使用 `docker-compose.yml`，需要先确认 Zeabur 是否支持外部网络 `smvapi`。如果不支持，请删除 Compose 文件中的：
+
+```yaml
+networks:
+  smvapi:
+    external: true
+    name: smvapi
+```
+
+以及服务里的：
+
+```yaml
+networks:
+  - smvapi
+```
+
+## VPS Docker Run
+
+不使用 Compose 时可以直接运行容器。
 
 ```bash
 docker run -d --name grok2api \
   -p 8000:8000 \
-  -e TZ=Asia/Shanghai \
-  -e LOG_LEVEL=INFO \
-  -e ACCOUNT_STORAGE=local \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/logs:/app/logs \
+  -e ACCOUNT_STORAGE=postgresql \
+  -e ACCOUNT_POSTGRESQL_URL='postgresql://avnadmin:password@host.aivencloud.com:12345/defaultdb?sslmode=verify-full' \
+  -e AIVEN_CA_CERT='-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----' \
+  -e SERVER_HOST=0.0.0.0 \
+  -e SERVER_PORT=8000 \
+  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/logs:/app/logs" \
   --restart unless-stopped \
   ghcr.io/jiujiu532/grok2api:latest
 ```
 
-Windows PowerShell：
+## 本地源码运行
 
-```powershell
-docker run -d `
-  --name grok2api `
-  -p 8000:8000 `
-  -e TZ=Asia/Shanghai `
-  -e LOG_LEVEL=INFO `
-  -e ACCOUNT_STORAGE=local `
-  -v ${PWD}/data:/app/data `
-  -v ${PWD}/logs:/app/logs `
-  --restart unless-stopped `
-  ghcr.io/jiujiu532/grok2api:latest
-```
-
----
-
-### 防封版部署
-
-> **前置要求**：服务器需支持 `NET_ADMIN` + `SYS_MODULE` 权限（KVM/XEN 虚拟化均支持，OpenVZ/LXC 不支持）。
+前置要求：Python 3.13+、uv。
 
 ```bash
-git clone https://github.com/jiujiu532/grok2api
-cd grok2api/grok2api-main/grok2api-main
-docker compose -f docker-compose.warp.yml up -d
-```
-
-防封版自动启动以下服务：
-
-| 服务 | 说明 |
-| :-- | :-- |
-| `warp-proxy` | Cloudflare WARP 出口代理，提供干净 IP |
-| `privoxy` | HTTP 代理，将流量转发到 WARP |
-| `flaresolverr` | 自动解 Cloudflare 挑战，获取 cf_clearance |
-| `init-config` | 初始化容器，自动写入代理配置 |
-| `grok2api` | 主服务 |
-
-启动后代理配置已自动完成，进入 Admin 后台添加账号即可使用。
-
----
-
-### Render + Aiven PostgreSQL 部署
-
-本仓库内置 `render.yaml`，可在 Render 上创建 Docker Web Service，并使用 Aiven PostgreSQL 作为外部数据库。
-
-1. 在 Aiven 创建 PostgreSQL 服务
-2. 复制 Aiven 的 PostgreSQL Service URI
-3. 在 URI 后追加 `?sslmode=require`，例如：
-
-```text
-postgresql://avnadmin:password@host.aivencloud.com:12345/defaultdb?sslmode=require
-```
-
-4. 将仓库推送到 GitHub
-5. 在 Render 选择 **New +** → **Blueprint**，连接该仓库
-6. Render 创建服务时，在 `ACCOUNT_POSTGRESQL_URL` 填入上面的 Aiven URI
-7. 点击 Apply / Deploy
-
-Render 会自动从 Dockerfile 构建镜像，并监听 Render 注入的 `PORT`。默认存储后端已设置为 `postgresql`。
-
----
-
-<details>
-<summary><strong>升级 / 回滚 / 卸载 / 迁移</strong></summary>
-
-### 升级
-
-无论标准版还是防封版，升级时只需更新 `grok2api` 主镜像，防封组件不需要更新。
-
-**标准版升级：**
-
-```bash
-docker pull ghcr.io/jiujiu532/grok2api:latest
-docker compose up -d --no-deps grok2api
-```
-
-**防封版升级（只更新主服务，不动 WARP/FlareSolverr）：**
-
-```bash
-docker pull ghcr.io/jiujiu532/grok2api:latest
-docker compose -f docker-compose.warp.yml up -d --no-deps grok2api
-```
-
-> `--no-deps` 确保只重启 grok2api，WARP/Privoxy/FlareSolverr 继续运行不中断。
-> 
-> `./data/` 中的配置（`config.toml`）和数据库（`accounts.db`）挂载在 volume 中，升级不会覆盖。
-
-### 回滚
-
-```bash
-# 查看可用版本：https://github.com/jiujiu532/grok2api/pkgs/container/grok2api
-docker pull ghcr.io/jiujiu532/grok2api:<tag>
-
-# 标准版回滚
-docker compose up -d --no-deps grok2api
-
-# 防封版回滚
-docker compose -f docker-compose.warp.yml up -d --no-deps grok2api
-```
-
-### 卸载
-
-**标准版卸载：**
-
-```bash
-cd grok2api/grok2api-main/grok2api-main
-docker compose down
-# 如需删除数据（不可恢复）：
-rm -rf ./data ./logs
-```
-
-**防封版卸载：**
-
-```bash
-cd grok2api/grok2api-main/grok2api-main
-docker compose -f docker-compose.warp.yml down
-# 如需删除数据（不可恢复）：
-rm -rf ./data ./logs
-```
-
-### 从标准版迁移到防封版
-
-数据完全保留，无需重新配置：
-
-```bash
-# 停止标准版
-docker compose down
-
-# 用防封版启动（自动检测已有配置，不覆盖）
-docker compose -f docker-compose.warp.yml up -d
-```
-
-</details>
-
----
-
-### 本地源码部署
-
-前置：Python 3.13+、[uv](https://docs.astral.sh/uv/getting-started/installation/)
-
-```bash
-git clone https://github.com/jiujiu532/grok2api
-cd grok2api/grok2api-main/grok2api-main
-cp .env.example .env && uv sync
+cp .env.example .env
+uv sync
 uv run granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
 ```
 
----
+## 启动后配置
 
-### 首次启动
+访问：
 
-访问 `http://localhost:8000/admin/login`，默认密码 `grok2api`，进入后设置：
+```text
+http://你的域名或IP/admin/login
+```
 
-1. `app.app_key` — Admin 密码
-2. `app.api_key` — API 鉴权密钥（留空不鉴权）
-3. `app.app_url` — 公网地址（图片/视频链接需要）
+默认 Admin 密码：
 
-> 配置保存即时生效，无需重启。
+```text
+grok2api
+```
 
----
+首次进入后建议修改：
 
-## 模型列表
-
-### Chat（ grok.com）
-
-basic表示free账号，spuer和heavy 为付费
-
-| 模型名 | mode | 账号等级 | 备注 |
-| :-- | :-- | :-- | :-- |
-| `grok-4.20-fast` / `grok-4.3-fast` | fast | basic（优先高等级） | 
-| `grok-4.20-auto` | auto | super | 
-| `grok-4.20-expert` | expert | super | 
-| `grok-4.20-heavy` | heavy | heavy | |
-| `grok-4.3-beta` | grok-420-computer-use-sa | super | 
-| `grok-4.20-multi-agent-0309` | heavy | heavy |
-| `grok-4.20-0309-non-reasoning` | fast | basic |
-| `grok-4.20-0309` | auto | super |
-| `grok-4.20-0309-reasoning` | expert | super |
-| `grok-4.20-0309-non-reasoning-super` | fast | super |
-| `grok-4.20-0309-super` | auto | super |
-| `grok-4.20-0309-reasoning-super` | expert | super |
-| `grok-4.20-0309-non-reasoning-heavy` | fast | heavy |
-| `grok-4.20-0309-heavy` | auto | heavy |
-| `grok-4.20-0309-reasoning-heavy` | expert | heavy |
-
-### Chat（ console.x.ai）
-
-通过 SSO Token 免费访问，不消耗付费额度。所有免费模型使用 **basic** 等级账号。
-
-| 模型名 | reasoning effort | 账号等级 |
-| :-- | :-- | :-- |
-| `grok-4.3-console` | 用户传入（默认 medium） | basic |
-| `grok-4.3-low` | low（固定） | basic |
-| `grok-4.3-medium` | medium（固定） | basic |
-| `grok-4.3-high` | high（固定） | basic |
-| `grok-4.20-0309-console` | 默认 | basic |
-| `grok-4.20-0309-reasoning-console` | 固定 reasoning | basic |
-| `grok-4.20-0309-non-reasoning-console` | 无 reasoning | basic |
-| `grok-4.20-multi-agent-console` | 用户传入（默认 medium） | basic|
-| `grok-4.20-multi-agent-low` | low（固定）→ 4 agents | basic|
-| `grok-4.20-multi-agent-medium` | medium（固定）→ 4 agents | basic|
-| `grok-4.20-multi-agent-high` | high（固定）→ 16 agents | basic |
-| `grok-4.20-multi-agent-xhigh` | xhigh（固定）→ 16 agents | basic|
-| `grok-build-console` | 默认 | basic |
-
-**Console 配额**：30 次 / 15 分钟窗口，采用延迟恢复轮换策略（消耗至剩余 15 次时启动计时器，评分机制自动轮换到其他账号）。后台每 30 秒巡检并自动重置过期配额。
-
-### Image / Video（ grok.com）
-
-| 模型名 | 能力 | 账号等级 |
-| :-- | :-- | :-- |
-| `grok-imagine-image-lite` | 文生图 | basic |
-| `grok-imagine-image` / `image-pro` | 文生图 | super |
-| `grok-imagine-image-edit` | 图像编辑 | super |
-| `grok-imagine-video` | 文生视频 | super |
-
----
-
-
-
-## 账号配置
-
-| 类型 | 等级 | 适用模型 |
-| :-- | :-- | :-- |
-| 付费账号（x.ai 官方） | super / heavy | `grok-4.20-*`、`grok-4.3-beta`、`grok-4.3-fast` |
-| 免费账号（console.x.ai SSO） | basic | 所有 `*-console` / `*-low` / `*-medium` / `*-high` / `*-xhigh` |
-
-**免费账号获取方式**：
-
-1. 浏览器 F12 打开开发者工具
-2. 访问 `https://console.x.ai/`
-3. Network 面板找任意请求，Cookie 中复制 `sso` 值
-4. Admin 后台 → 账号管理 → 添加账号，粘贴 token
-
-> SSO Token 属于敏感凭证，请勿写入代码或提交到版本库。
-
----
+| 配置项 | 说明 |
+| :-- | :-- |
+| `app.app_key` | Admin 登录密码 |
+| `app.api_key` | API 鉴权密钥 |
+| `app.app_url` | 公网访问地址，图片/视频链接需要 |
 
 ## API 端点
 
 | 端点 | 说明 |
 | :-- | :-- |
-| `GET /v1/models` | 列出可用模型 |
-| `POST /v1/chat/completions` | 聊天 / 图像 / 视频统一入口 |
-| `POST /v1/responses` | OpenAI Responses API |
-| `POST /v1/messages` | Anthropic Messages API |
+| `GET /health` | 健康检查 |
+| `GET /v1/models` | 模型列表 |
+| `POST /v1/chat/completions` | OpenAI Chat Completions |
+| `POST /v1/responses` | OpenAI Responses |
+| `POST /v1/messages` | Anthropic Messages |
 | `POST /v1/images/generations` | 图像生成 |
 | `POST /v1/images/edits` | 图像编辑 |
-| `POST /v1/videos` | 异步视频任务 |
-| `GET /v1/videos/{id}` / `{id}/content` | 查询 / 下载视频 |
-
----
-
-## 环境变量
-
-| 变量名 | 说明 | 默认值 |
-| :-- | :-- | :-- |
-| `TZ` | 时区 | `Asia/Shanghai` |
-| `LOG_LEVEL` | 日志级别 | `INFO` |
-| `LOG_FILE_ENABLED` | 写入本地文件日志 | `true` |
-| `SERVER_HOST` | 监听地址 | `0.0.0.0` |
-| `SERVER_PORT` | 监听端口 | `8000` |
-| `SERVER_WORKERS` | Granian worker 数量 | `1` |
-| `HOST_PORT` | Compose 宿主机映射端口 | `8000` |
-| `DATA_DIR` | 本地数据根目录 | `./data` |
-| `LOG_DIR` | 本地日志目录 | `./logs` |
-| `ACCOUNT_STORAGE` | 存储后端：`local` / `redis` / `mysql` / `postgresql` | `local` |
-| `ACCOUNT_SYNC_INTERVAL` | 增量同步间隔（秒） | `30` |
-| `ACCOUNT_SYNC_ACTIVE_INTERVAL` | 活跃同步间隔（秒） | `3` |
-| `ACCOUNT_LOCAL_PATH` | SQLite 路径 | `${DATA_DIR}/accounts.db` |
-| `ACCOUNT_REDIS_URL` | Redis DSN | `""` |
-| `ACCOUNT_MYSQL_URL` | MySQL DSN | `""` |
-| `ACCOUNT_POSTGRESQL_URL` | PostgreSQL DSN | `""` |
-| `ACCOUNT_SQL_POOL_SIZE` | 连接池核心连接数 | `5` |
-| `ACCOUNT_SQL_MAX_OVERFLOW` | 连接池最大溢出 | `10` |
-| `ACCOUNT_SQL_POOL_TIMEOUT` | 等待空闲连接超时（秒） | `30` |
-| `ACCOUNT_SQL_POOL_RECYCLE` | 连接最大复用时间（秒） | `1800` |
-
-运行时配置支持 `GROK_` 前缀覆盖，如 `GROK_APP_API_KEY` 覆盖 `app.api_key`。
-
----
-
-## 调用示例
-
-```bash
-# 付费账号对话
-curl http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"grok-4.20-auto","stream":true,"messages":[{"role":"user","content":"你好"}]}'
-
-# 免费账号对话
-curl http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"grok-4.3-console","stream":true,"messages":[{"role":"user","content":"你好"}]}'
-```
-
----
+| `POST /v1/videos` | 视频任务 |
 
 ## 常见问题
 
-| 问题 | 解决方案 |
-| :-- | :-- |
-| Admin 打不开 | 确认端口映射和防火墙：`docker compose ps` |
-| 图片/视频链接 403 | 设置 `app.app_url` 为公网地址（含 `https://`） |
-| Cloudflare 拦截 | 更换代理，或者切换防封版部署，再或者手动配置 `proxy.clearance.mode` |
-| 多 Worker 冲突 | 无冲突，调度器通过文件锁选举 leader |
+### Aiven 连接失败
 
----
+优先检查：
 
-## 更新日志
+- `ACCOUNT_POSTGRESQL_URL` 是否正确。
+- URL 是否包含 `sslmode=verify-full` 或 `sslmode=require`。
+- `AIVEN_CA_CERT` 是否是完整 `ca.pem` 内容。
+- 数据库防火墙是否允许部署平台出口 IP。
+- Aiven 用户名、密码、端口、数据库名是否正确。
 
-### v0.1.7
+### Render 部署后健康检查失败
 
-**新功能**
+检查 Render 日志，确认：
 
-- 🔌 **Console 原生工具调用支持**（[PR#24](https://github.com/jiujiu532/grok2api/pull/24)，感谢 @daoguademeng）
-  - Console 模型支持 OpenAI 兼容的 `tools` / `tool_choice` 参数
-  - 客户端 function tools（如 bash、read）可稳定产出 `tool_calls`
-  - Grok 内置工具（web_search、x_search 等 19 个）保持内部语义，不泄露为客户端 tool_calls
-  - 支持多轮 tool-call 上下文（assistant tool_calls + tool result 正确转换）
-  - 新增 738 行回归测试覆盖核心逻辑
+- Dockerfile 是否构建成功。
+- 应用是否监听 Render 注入的 `PORT`。
+- `ACCOUNT_POSTGRESQL_URL` 和 `AIVEN_CA_CERT` 是否已填写。
 
-**优化**
+### Vercel 部署后 500
 
-- 🔧 **Console 配额参数调整**：恢复周期从 15 分钟改为 30 分钟，轮换阈值从 15 改为 20，降低单号负载
-- 💓 **SSE 心跳保活**：所有流式接口在数据开始前发送心跳注释，防止思考期间连接超时
-- ⚡ **TXT 导入异步化**：大批量导入不再阻塞，接口立即返回，刷新在后台进行
-- 🔒 **依赖安全升级**：cryptography 48.0.1+、starlette 1.1.0+、python-multipart 0.0.31+
+检查 Vercel Function 日志，常见原因：
 
-**修复**
+- 未设置 `ACCOUNT_POSTGRESQL_URL`。
+- Aiven 证书变量格式错误。
+- 依赖安装失败。
+- Serverless 执行时间或包体积限制。
 
-- 🐛 修复 NSFW 初始化时生日已锁定的 429 报错（[PR#25](https://github.com/jiujiu532/grok2api/pull/25)，感谢 @Xaihi-nun）
-- 🐛 修复批量刷新结果未区分异常与临时失败的问题
+### Docker Compose 报 `network smvapi not found`
 
-### v0.1.5 (2025-06-13)
+先创建外部网络：
 
-**优化**
+```bash
+docker network create smvapi
+```
 
-- 🔧 **批量刷新结果优化**：刷新账户时区分"凭证失效（异常）"和"临时失败（网络波动）"两种状态
-  - 前端提示更清晰：`刷新完成：成功 906，异常 40，临时失败 54`
-  - 后端性能优化：批量查询失败账户状态（从 N 次数据库查询降为 1 次）
-  - 异常账户自动进入"异常"筛选组，临时失败不影响账户状态
+## 许可证
 
-- 🎯 **导入账户交互改进**（基于 [PR#13](https://github.com/jiujiu532/grok2api/pull/13)）
-  - 新增/导入弹窗中加入"导入后自动开启 NSFW"复选框（默认不勾选）
-  - 工具栏按钮互斥显示：勾选账号时显示批量操作按钮，未勾选显示全局按钮
-  - 去除全局配置 `account.auto_nsfw_on_import`，改为每次导入时手动选择
-
-- ⚙️ **并发数限制调整**
-  - 批量操作硬限制从 50 调整为 80
-  - 配置页并发数输入框添加 `min: 1, max: 80` 强制限制
-  - 防止用户输入超出范围的并发值导致后端压力过大
-
-**修复**
-
-- 🐛 修复配置页数字输入框 `min/max` 属性未生效的问题
-- 🐛 补充 `tokens.py` 缺失的 `Query` 导入（导致服务启动失败）
-- 🐛 补充翻译文件中缺失的 `autoNsfwOnImport` 和 `autoNsfwHint` 键
-
----
-
-## 致谢
-
-- 上游：[chenyme/grok2api](https://github.com/chenyme/grok2api)
-- DeepWiki：[chenyme/grok2api](https://deepwiki.com/chenyme/grok2api)
-- 项目文档：[blog.cheny.me](https://blog.cheny.me/blog/posts/grok2api)
-- 社区：[Linux.do](https://linux.do)
-
----
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=jiujiu532/grok2api&type=Date)](https://star-history.com/#jiujiu532/grok2api&Date)
-
----
-
-<div align="center">
-
-**MIT License**
-
-</div>
+MIT License

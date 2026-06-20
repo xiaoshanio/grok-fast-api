@@ -66,7 +66,7 @@ COPY app ./app
 COPY scripts ./scripts
 
 RUN mkdir -p /app/data /app/logs \
-    && chmod +x /app/scripts/entrypoint.sh /app/scripts/init_storage.sh
+    && chmod +x /app/scripts/entrypoint.sh /app/scripts/init_storage.sh /app/scripts/init_aiven_ca.sh
 
 EXPOSE 8000
 
