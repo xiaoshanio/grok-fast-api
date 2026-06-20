@@ -1,7 +1,7 @@
 {
   "version": 2,
   "functions": {
-    "api/index.py": {
+    "api/**/*.py": {
       "maxDuration": 60,
       "excludeFiles": "{tests/**,docs/**,scripts/**,Dockerfile*,docker-compose*.yml,render.yaml,*.md,uv.lock}"
     }
